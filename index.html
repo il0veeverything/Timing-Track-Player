@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<title>Audio Player</title>
+<style>
+:root{--bg:#000;--fg:#fff;--mute:#8a8a8a;--line:#262626;--r:6px}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  overflow:hidden;-webkit-tap-highlight-color:transparent;user-select:none}
+button{font-family:inherit}
+
+/* 再生画面（全面がボタン） */
+#play{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:calc(env(safe-area-inset-top) + 56px) 24px calc(env(safe-area-inset-bottom) + 24px);cursor:pointer;text-align:center}
+#action{font-size:clamp(44px,14vw,140px);font-weight:800;letter-spacing:.02em;line-height:1.1}
+#hint{margin-top:18px;font-size:14px;color:var(--mute)}
+#name{margin-top:30px;font-size:clamp(16px,4.5vw,24px);max-width:92%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  padding-bottom:6px;border-bottom:1px solid var(--fg);min-height:1.6em}
+#name:empty{border-color:transparent}
+#meta{margin-top:12px;font-size:12px;color:var(--mute)}
+
+/* 右上ボタン */
+.top{position:fixed;top:calc(env(safe-area-inset-top) + 12px);right:12px;display:flex;gap:6px;z-index:5}
+.top button{background:var(--bg);color:var(--fg);border:1px solid var(--fg);border-radius:var(--r);
+  font-size:13px;padding:6px 12px;cursor:pointer}
+
+/* トースト */
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 28px);transform:translateX(-50%);
+  background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:var(--r);font-size:14px;max-width:90%;
+  display:none;z-index:20;text-align:center}
+#toast.show{display:block}
+
+/* モーダル */
+.modal{position:fixed;inset:0;background:var(--bg);z-index:10;display:none;flex-direction:column}
+.modal.open{display:flex}
+.modal header{display:flex;align-items:center;justify-content:space-between;
+  padding:calc(env(safe-area-inset-top) + 14px) 16px 14px;border-bottom:1px solid var(--line)}
+.modal header h2{margin:0;font-size:17px;font-weight:700}
+.modal .body{flex:1;overflow:auto;padding:4px 16px calc(env(safe-area-inset-bottom) + 32px)}
+.sec{padding:18px 0;border-bottom:1px solid var(--line)}
+.sec:last-child{border-bottom:0}
+.sec h3{margin:0 0 4px;font-size:15px;font-weight:700}
+.sec .desc{margin:0 0 12px;font-size:12px;color:var(--mute);line-height:1.6}
+
+.btn{background:var(--bg);color:var(--fg);border:1px solid var(--fg);border-radius:var(--r);padding:9px 14px;font-size:14px;cursor:pointer}
+.btn.solid{background:var(--fg);color:var(--bg)}
+.btn.sm{padding:5px 10px;font-size:12px}
+.btn.wide{flex:1;text-align:left;display:flex;justify-content:space-between;align-items:center}
+.btn:disabled{opacity:.4}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input[type=text],select{background:var(--bg);color:var(--fg);border:1px solid var(--fg);border-radius:var(--r);padding:10px;font-size:15px;width:100%}
+.list{display:flex;flex-direction:column;gap:8px}
+
+/* ツリー */
+.fold{border:1px solid var(--line);border-radius:var(--r);margin-bottom:8px;overflow:hidden}
+.fold-head{display:flex;align-items:center;width:100%}
+.fold-head .tog{width:44px;align-self:stretch;background:none;border:0;color:var(--fg);font-size:16px;cursor:pointer;border-right:1px solid var(--line)}
+.fold-head .nm{flex:1;background:none;border:0;color:var(--fg);text-align:left;padding:12px;font-size:15px;font-weight:700;cursor:pointer}
+.fold-head .cnt{padding:0 12px;font-size:12px;color:var(--mute)}
+.fold-head.sel{background:var(--fg)}
+.fold-head.sel .nm,.fold-head.sel .tog,.fold-head.sel .cnt{color:var(--bg)}
+.fold-head.sel .tog{border-color:var(--bg)}
+.files{border-top:1px solid var(--line)}
+.file{display:block;width:100%;background:none;border:0;border-bottom:1px solid var(--line);color:var(--fg);
+  text-align:left;padding:11px 14px 11px 44px;font-size:14px;cursor:pointer}
+.file:last-child{border-bottom:0}
+.file.sel{background:var(--fg);color:var(--bg)}
+.empty{font-size:13px;color:var(--mute);padding:8px 0}
+
+/* スライダー */
+.slider{display:flex;align-items:center;gap:12px}
+input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:2px;background:var(--fg);outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--fg);border:3px solid var(--bg);box-shadow:0 0 0 1px var(--fg)}
+input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:var(--fg);border:3px solid var(--bg)}
+.val{min-width:64px;text-align:right;font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
+.chips{display:flex;gap:8px;margin-top:12px}
+.chips button{flex:1}
+.chips button.on{background:var(--fg);color:var(--bg)}
+.hidden{display:none !important}
+</style>
+</head>
+<body>
+
+<!-- 再生画面：画面全体が再生ボタン -->
+<div id="play" role="button" tabindex="0" aria-label="再生">
+  <div id="action">音源を選ぶ</div>
+  <div id="hint">右上の「音源」から再生する音源を選んでください</div>
+  <div id="name"></div>
+  <div id="meta"></div>
+</div>
+
+<div class="top">
+  <button id="btnSource" type="button">音源</button>
+  <button id="btnSettings" type="button">設定</button>
+</div>
+
+<div id="toast"></div>
+
+<!-- 音源選択 -->
+<div class="modal" id="sourceModal" aria-hidden="true">
+  <header>
+    <h2>音源を選ぶ</h2>
+    <button class="btn sm" type="button" data-close="sourceModal">閉じる</button>
+  </header>
+  <div class="body">
+    <div class="sec">
+      <h3>ショートカット</h3>
+      <p class="desc">よく使う音源を登録しておくと、ここからすぐ選べます。</p>
+      <div class="list" id="shortcutList"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn sm" type="button" id="toggleScForm">＋ ショートカットを追加</button>
+      </div>
+      <div id="scForm" class="hidden" style="margin-top:12px">
+        <div class="list">
+          <input type="text" id="scLabel" placeholder="表示名（例：朝練）">
+          <select id="scTarget"></select>
+          <button class="btn solid" type="button" id="scAdd">追加する</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>フォルダ・ファイル</h3>
+      <p class="desc">▸ で中身を開きます。フォルダ名を押すとそのフォルダを選び、中からランダムに再生します。ファイル名を押すとそのファイルを再生します。</p>
+      <div id="tree"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 設定 -->
+<div class="modal" id="settingsModal" aria-hidden="true">
+  <header>
+    <h2>設定</h2>
+    <button class="btn sm" type="button" data-close="settingsModal">閉じる</button>
+  </header>
+  <div class="body">
+    <div class="sec">
+      <h3>スキップ秒数</h3>
+      <p class="desc">再生を開始する地点（秒）です。0〜10秒、0.1秒単位で指定できます。</p>
+      <div class="slider">
+        <input type="range" id="skipRange" min="0" max="10" step="0.1" value="0">
+        <span class="val" id="skipVal">0.0秒</span>
+      </div>
+      <div class="chips">
+        <button class="btn sm" type="button" data-skip="0">0秒</button>
+        <button class="btn sm" type="button" data-skip="5">5秒</button>
+        <button class="btn sm" type="button" data-skip="7">7秒</button>
+        <button class="btn sm" type="button" data-skip="9">9秒</button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>オフライン音源</h3>
+      <p class="desc">プリセット音源をこの端末に保存すると、通信なしでも再生できます。配信元の制限で保存できない場合は、下のファイル取り込みを使ってください。</p>
+      <div class="row">
+        <button class="btn solid" type="button" id="btnDownload">プリセットを保存</button>
+      </div>
+      <p class="desc" id="offlineStatus" style="margin:10px 0 0"></p>
+    </div>
+
+    <div class="sec">
+      <h3>ファイルを取り込む</h3>
+      <p class="desc">手元の音源ファイルを追加すると「取り込み」フォルダに入ります。</p>
+      <label class="btn solid" style="display:inline-block">ファイルを選ぶ
+        <input type="file" id="fileInput" accept="audio/*" multiple style="display:none">
+      </label>
+      <p class="desc" id="importStatus" style="margin:10px 0 0"></p>
+    </div>
+
+    <div class="sec">
+      <h3>取り込んだ音源</h3>
+      <p class="desc">取り込んだ音源をすべて削除します。</p>
+      <button class="btn sm" type="button" id="btnClearImports">すべて削除</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ========== 1. 固定フォルダ構成 ========== */
+const PRESET_TREE = [
+  { id: 'f-ddc', name: 'DDC', type: 'folder', children: [
+    { id: 'ddc-s1', name: 'DDC Speed Alt.1', type: 'file', url: 'https://static1.squarespace.com/static/5bc1ef4629f2cc29fcf63eaa/t/5ff9cacef034304956fc63d2/1610205906946/%5B2017%5D+JDDA+Timing+Tracks+-+Speed+alt+1.m4a' },
+    { id: 'ddc-s2', name: 'DDC Speed Alt.2', type: 'file', url: 'https://static1.squarespace.com/static/5bc1ef4629f2cc29fcf63eaa/t/5ff9caf9de3f5f064f50e2bc/1610205949368/%5B2017%5D+JDDA+Timing+Tracks+-+Speed+alt+2.m4a' },
+    { id: 'ddc-s3', name: 'DDC Speed Alt.3', type: 'file', url: 'https://static1.squarespace.com/static/5bc1ef4629f2cc29fcf63eaa/t/5ff9cb0f3b112d2bb6d18b03/1610205971526/%5B2017%5D+JDDA+Timing+Tracks+-+Speed+alt+3.m4a' },
+  ]},
+  { id: 'f-ijru-dd', name: 'IJRU DD', type: 'folder', children: [
+    { id: 'ddsr', name: 'DDSR', type: 'file', url: 'https://static1.squarespace.com/static/5bc1ef4629f2cc29fcf63eaa/t/5da876ceaa308d3918d135c5/1571321574964/%5B1.0.0%5D+DDSR.mp3' },
+    { id: 'ddss', name: 'DDSS', type: 'file', url: 'https://static1.squarespace.com/static/5bc1ef4629f2cc29fcf63eaa/t/5da876f882139730872a066f/1571321604789/%5B1.0.0%5D+DDSS.mp3' },
+  ]},
+  { id: 'f-ijru-sr', name: 'IJRU Single Rope', type: 'folder', children: [
+    { id: 'srss', name: 'SRSS', type: 'file', url: 'https://static1.squarespace.com/static/5bc1ef4629f2cc29fcf63eaa/t/5da874b97c73972f004d6022/1571321024498/%5B1.0.0%5D+SRSS.mp3' },
+    { id: 'srse', name: 'SRSE', type: 'file', url: 'https://static1.squarespace.com/static/5bc1ef4629f2cc29fcf63eaa/t/5da876467c73972f004d8b93/1571321448631/%5B1.0.0%5D+SRSE.mp3' },
+    { id: 'srdr', name: 'SRDR', type: 'file', url: 'https://static1.squarespace.com/static/5bc1ef4629f2cc29fcf63eaa/t/5da876b0fed85c66cd50a6e4/1571321533739/%5B1.0.0%5D+SRDR.mp3' },
+    { id: 'srtu', name: 'SRTU', type: 'file', url: 'https://static1.squarespace.com/static/5bc1ef4629f2cc29fcf63eaa/t/5da87675aa308d3918d12da9/1571321468176/%5B1.0.0%5D+SRTU.mp3' },
+    { id: 'srsr', name: 'SRSR', type: 'file', url: 'https://static1.squarespace.com/static/5bc1ef4629f2cc29fcf63eaa/t/5da8768ba1dbef079dc77e30/1571321506349/%5B1.0.0%5D+SRSR.mp3' },
+  ]},
+];
+const IMPORT_FOLDER_ID = 'f-import';
+
+/* ========== 2. 永続化 ========== */
+const DB_NAME = 'audio-player', STORE = 'audio';
+const LS = { skip: 'ap.skip', imports: 'ap.imports', shortcuts: 'ap.shortcuts' };
+
+let dbPromise = null;
+function db() {
+  if (!dbPromise) dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return dbPromise;
+}
+async function idbPut(key, value) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const tx = d.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(value, key);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbGet(key) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const r = d.transaction(STORE).objectStore(STORE).get(key);
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function idbDelete(key) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const tx = d.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(key);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+}
+const loadLS = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const saveLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+let importedFiles = loadLS(LS.imports, []);
+let shortcuts = loadLS(LS.shortcuts, []);
+let skipSeconds = Number(loadLS(LS.skip, 0)) || 0;
+
+/* ========== 3. ツリー ========== */
+function buildTree() {
+  return [...PRESET_TREE, {
+    id: IMPORT_FOLDER_ID, name: '取り込み', type: 'folder',
+    children: importedFiles.map(f => ({ id: f.id, name: f.name, type: 'file' })),
+  }];
+}
+let tree = buildTree();
+let nodeMap = new Map();
+function indexNodes(nodes, parent = null) {
+  for (const n of nodes) {
+    nodeMap.set(n.id, { node: n, parent });
+    if (n.children) indexNodes(n.children, n);
+  }
+}
+function reindex() { nodeMap = new Map(); indexNodes(tree); }
+reindex();
+
+function filesUnder(node) {
+  if (node.type === 'file') return [node];
+  return node.children.flatMap(filesUnder);
+}
+function stripExt(name) {
+  return name.replace(/\.(mp3|m4a|wav|ogg|flac|aac|webm|mp4)$/i, '');
+}
+
+/* ========== 4. 状態 ========== */
+// selection: { id, type: 'file'|'folder' }
+// playState: 'idle' | 'loading' | 'playing' | 'stopped' | 'ended'
+let selection = null;
+let playState = 'idle';
+const audio = new Audio();
+audio.preload = 'auto';
+const urlCache = new Map();
+
+const $ = id => document.getElementById(id);
+const el = { action: $('action'), hint: $('hint'), name: $('name'), meta: $('meta'), play: $('play') };
+
+function isFolderSel() { return !!selection && selection.type === 'folder'; }
+
+function toast(msg, ms = 3500) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+function render() {
+  const folder = isFolderSel();
+  const selNode = selection ? nodeMap.get(selection.id)?.node : null;
+
+  let action, hint;
+  if (!selNode) {
+    action = '音源を選ぶ';
+    hint = '右上の「音源」から再生する音源を選んでください';
+  } else if (playState === 'loading') {
+    action = '読込中…'; hint = 'しばらくお待ちください';
+  } else if (playState === 'playing') {
+    action = '停止';
+    hint = folder ? 'タップで停止（ランダム再生中）' : 'タップで一時停止';
+  } else if (playState === 'ended') {
+    action = folder ? 'ランダムで再生' : 'リセットして再生';
+    hint = '再生が終わりました。タップでもう一度再生';
+  } else if (playState === 'stopped') {
+    action = folder ? 'ランダムで再生' : 'リセットして再生';
+    hint = folder ? 'タップで別の曲をランダム再生' : 'タップで最初から再生';
+  } else {
+    action = folder ? 'ランダムで再生' : '再生';
+    hint = folder ? 'フォルダ内からランダムに1曲再生します' : 'タップで再生';
+  }
+  el.action.textContent = action;
+  el.hint.textContent = hint;
+
+  // 選択中のフォルダ/ファイル名（拡張子なし）。ランダム時も再生中のファイル名は出さない
+  el.name.textContent = selNode ? stripExt(selNode.name) : '';
+  el.meta.textContent = selNode
+    ? (folder ? 'フォルダ' : 'ファイル') + ` ・ 開始位置 ${skipSeconds.toFixed(1)}秒`
+    : '';
+}
+
+/* ========== 5. 再生 ========== */
+// iOS Safari対策：タップの同期処理内で再生権限を取得（無音データで解錠）
+const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+function unlockAudio() {
+  audio.src = SILENT;
+  const p = audio.play();
+  if (p && p.catch) p.catch(() => {});
+}
+
+async function resolveSrc(fileNode) {
+  if (urlCache.has(fileNode.id)) return urlCache.get(fileNode.id);
+  const blob = await idbGet(fileNode.id).catch(() => undefined);
+  if (blob) {
+    const u = URL.createObjectURL(blob);
+    urlCache.set(fileNode.id, u);
+    return u;
+  }
+  return fileNode.url || null;
+}
+
+function pickRandom(folderNode) {
+  const pool = filesUnder(folderNode);
+  if (pool.length === 0) return null;
+  return pool[Math.floor(Math.random() * pool.length)]; // 完全ランダム・重複考慮なし
+}
+
+let currentToken = 0;
+async function playFile(fileNode) {
+  const token = ++currentToken;
+  playState = 'loading';
+  render();
+
+  const src = await resolveSrc(fileNode);
+  if (token !== currentToken) return;
+  if (!src) {
+    playState = 'idle';
+    render();
+    toast('この音源はオフラインで保存されていません。設定から保存するか、ファイルを取り込んでください');
+    return;
+  }
+
+  audio.src = src;
+  audio.addEventListener('loadedmetadata', () => {
+    if (token !== currentToken) return;
+    if (skipSeconds > 0) { try { audio.currentTime = skipSeconds; } catch {} }
+  }, { once: true });
+
+  const p = audio.play();
+  if (p && p.catch) p.catch(err => {
+    if (token !== currentToken) return;
+    playState = 'stopped';
+    render();
+    toast('再生できませんでした（' + (err && err.name ? err.name : '不明') + '）');
+  });
+}
+
+function onPlayTap() {
+  if (!selection) { openModal('sourceModal'); return; }
+
+  // 再生中・読込中 → 停止
+  if (playState === 'playing' || playState === 'loading') {
+    currentToken++;
+    audio.pause();
+    playState = 'stopped';
+    render();
+    return;
+  }
+
+  // 待機中・停止中・終了後 → 最初から再生（フォルダ選択時は抽選）
+  unlockAudio();
+  const node = nodeMap.get(selection.id)?.node;
+  const track = isFolderSel() ? pickRandom(node) : node;
+  if (!track) { toast('このフォルダには音源がありません'); return; }
+  playFile(track);
+}
+
+audio.addEventListener('playing', () => {
+  if (playState === 'loading') { playState = 'playing'; render(); }
+});
+audio.addEventListener('ended', () => {
+  // 次のトラックには進まず、終了状態で止める
+  playState = 'ended';
+  render();
+});
+audio.addEventListener('error', () => {
+  if (audio.src === SILENT || !audio.getAttribute('src')) return;
+  if (playState !== 'loading' && playState !== 'playing') return;
+  playState = 'stopped';
+  render();
+  toast('音源を読み込めませんでした。通信状態か、音源の配信元をご確認ください');
+});
+
+el.play.addEventListener('click', onPlayTap);
+el.play.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlayTap(); }
+});
+
+/* ========== 6. モーダル ========== */
+function openModal(id) {
+  const m = $(id);
+  m.classList.add('open');
+  m.setAttribute('aria-hidden', 'false');
+  if (id === 'sourceModal') {
+    expandToSelection();
+    renderTree();
+    renderShortcuts();
+    refreshTargetSelect();
+  }
+  if (id === 'settingsModal') {
+    syncSkipUI();
+    refreshOfflineStatus();
+  }
+}
+function closeModal(id) {
+  const m = $(id);
+  m.classList.remove('open');
+  m.setAttribute('aria-hidden', 'true');
+}
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => closeModal(b.dataset.close)));
+$('btnSource').addEventListener('click', e => { e.stopPropagation(); openModal('sourceModal'); });
+$('btnSettings').addEventListener('click', e => { e.stopPropagation(); openModal('settingsModal'); });
+document.querySelector('.top').addEventListener('click', e => e.stopPropagation());
+
+/* ========== 7. 音源選択 ========== */
+const openSet = new Set();
+
+function expandToSelection() {
+  if (!selection) return;
+  let p = nodeMap.get(selection.id)?.parent;
+  while (p) { openSet.add(p.id); p = nodeMap.get(p.id)?.parent; }
+}
+
+function select(id, { close = false } = {}) {
+  const info = nodeMap.get(id);
+  if (!info) return;
+  selection = { id, type: info.node.type };
+  playState = 'idle';
+  currentToken++;
+  audio.pause();
+  render();
+  if (close) closeModal('sourceModal');
+  else renderTree();
+}
+
+function renderTree() {
+  const root = $('tree');
+  root.innerHTML = '';
+  for (const n of tree) root.appendChild(renderFolder(n));
+}
+
+function renderFolder(folder) {
+  const wrap = document.createElement('div');
+  wrap.className = 'fold';
+  const isSel = selection && selection.id === folder.id;
+  const head = document.createElement('div');
+  head.className = 'fold-head' + (isSel ? ' sel' : '');
+
+  const open = openSet.has(folder.id);
+  const tog = document.createElement('button');
+  tog.type = 'button';
+  tog.className = 'tog';
+  tog.setAttribute('aria-label', open ? '閉じる' : '開く');
+  tog.textContent = open ? '▾' : '▸';
+  tog.addEventListener('click', () => {
+    if (open) openSet.delete(folder.id); else openSet.add(folder.id);
+    renderTree();
+  });
+
+  const nm = document.createElement('button');
+  nm.type = 'button';
+  nm.className = 'nm';
+  nm.textContent = folder.name;
+  nm.addEventListener('click', () => select(folder.id, { close: true }));
+
+  const cnt = document.createElement('span');
+  cnt.className = 'cnt';
+  cnt.textContent = `${filesUnder(folder).length}件`;
+
+  head.append(tog, nm, cnt);
+  wrap.appendChild(head);
+
+  if (open) {
+    const files = document.createElement('div');
+    files.className = 'files';
+    if (folder.children.length === 0) {
+      const e = document.createElement('div');
+      e.className = 'empty';
+      e.style.padding = '12px 14px';
+      e.textContent = 'まだ音源がありません';
+      files.appendChild(e);
+    }
+    for (const c of folder.children) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'file' + (selection && selection.id === c.id ? ' sel' : '');
+      b.textContent = stripExt(c.name);
+      b.addEventListener('click', () => select(c.id, { close: true }));
+      files.appendChild(b);
+    }
+    wrap.appendChild(files);
+  }
+  return wrap;
+}
+
+function renderShortcuts() {
+  const list = $('shortcutList');
+  list.innerHTML = '';
+  if (shortcuts.length === 0) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = 'まだ登録されていません';
+    list.appendChild(e);
+    return;
+  }
+  for (const sc of shortcuts) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.flexWrap = 'nowrap';
+    const target = nodeMap.get(sc.target)?.node;
+
+    const play = document.createElement('button');
+    play.type = 'button';
+    play.className = 'btn wide';
+    const a = document.createElement('span'); a.textContent = sc.label;
+    const b = document.createElement('span');
+    b.style.cssText = 'font-size:12px;opacity:.7';
+    b.textContent = target ? (target.type === 'folder' ? 'ランダム' : 'ファイル') : '対象なし';
+    play.append(a, b);
+    play.disabled = !target;
+    play.addEventListener('click', () => select(sc.target, { close: true }));
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'btn sm';
+    del.textContent = '削除';
+    del.addEventListener('click', () => {
+      shortcuts = shortcuts.filter(s => s.id !== sc.id);
+      saveLS(LS.shortcuts, shortcuts);
+      renderShortcuts();
+    });
+    row.append(play, del);
+    list.appendChild(row);
+  }
+}
+
+function refreshTargetSelect() {
+  const sel = $('scTarget');
+  sel.innerHTML = '';
+  const walk = (nodes, depth) => {
+    for (const n of nodes) {
+      const o = document.createElement('option');
+      o.value = n.id;
+      o.textContent = '\u3000'.repeat(depth) + (n.type === 'folder' ? '[フォルダ] ' : '') + stripExt(n.name);
+      sel.appendChild(o);
+      if (n.children) walk(n.children, depth + 1);
+    }
+  };
+  walk(tree, 0);
+}
+
+$('toggleScForm').addEventListener('click', () => {
+  $('scForm').classList.toggle('hidden');
+  refreshTargetSelect();
+});
+$('scAdd').addEventListener('click', () => {
+  const label = $('scLabel').value.trim();
+  const target = $('scTarget').value;
+  if (!label) { toast('表示名を入力してください'); return; }
+  shortcuts.push({ id: 'sc-' + Date.now().toString(36), label, target });
+  saveLS(LS.shortcuts, shortcuts);
+  $('scLabel').value = '';
+  $('scForm').classList.add('hidden');
+  renderShortcuts();
+  toast('ショートカットを追加しました');
+});
+
+/* ========== 8. 設定：スキップ秒数 ========== */
+function syncSkipUI() {
+  $('skipRange').value = skipSeconds;
+  $('skipVal').textContent = skipSeconds.toFixed(1) + '秒';
+  document.querySelectorAll('[data-skip]').forEach(b =>
+    b.classList.toggle('on', Number(b.dataset.skip) === skipSeconds));
+}
+function setSkip(v) {
+  skipSeconds = Math.min(10, Math.max(0, Math.round(v * 10) / 10));
+  saveLS(LS.skip, skipSeconds);
+  syncSkipUI();
+  render();
+}
+$('skipRange').addEventListener('input', e => setSkip(Number(e.target.value)));
+document.querySelectorAll('[data-skip]').forEach(b => b.addEventListener('click', () => setSkip(Number(b.dataset.skip))));
+
+/* ========== 9. オフライン保存・取り込み ========== */
+function presetFiles() { return PRESET_TREE.flatMap(filesUnder); }
+
+async function refreshOfflineStatus() {
+  const files = presetFiles();
+  let saved = 0;
+  for (const f of files) if (await idbGet(f.id).catch(() => undefined)) saved++;
+  $('offlineStatus').textContent = `保存済み ${saved} / ${files.length} 件`;
+}
+
+$('btnDownload').addEventListener('click', async () => {
+  const files = presetFiles();
+  let ok = 0, ng = 0;
+  $('offlineStatus').textContent = '保存しています…';
+  for (const f of files) {
+    if (await idbGet(f.id).catch(() => undefined)) { ok++; continue; }
+    try {
+      const res = await fetch(f.url, { mode: 'cors' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      await idbPut(f.id, await res.blob());
+      ok++;
+    } catch { ng++; }
+  }
+  $('offlineStatus').textContent = `保存済み ${ok} / ${files.length} 件` +
+    (ng ? `（${ng}件は保存できませんでした。ファイル取り込みをご利用ください）` : '');
+});
+
+$('fileInput').addEventListener('change', async e => {
+  const files = [...e.target.files];
+  for (const f of files) {
+    const id = 'imp-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    await idbPut(id, f);
+    importedFiles.push({ id, name: stripExt(f.name) });
+  }
+  saveLS(LS.imports, importedFiles);
+  tree = buildTree();
+  reindex();
+  $('importStatus').textContent = `${files.length}件を取り込みました（「取り込み」フォルダ）`;
+  e.target.value = '';
+});
+
+$('btnClearImports').addEventListener('click', async () => {
+  if (!confirm('取り込んだ音源をすべて削除します。よろしいですか？')) return;
+  for (const f of importedFiles) {
+    await idbDelete(f.id).catch(() => {});
+    const u = urlCache.get(f.id);
+    if (u) { URL.revokeObjectURL(u); urlCache.delete(f.id); }
+  }
+  importedFiles = [];
+  saveLS(LS.imports, importedFiles);
+  if (selection && !nodeMap.has(selection.id)) selection = null;
+  tree = buildTree();
+  reindex();
+  render();
+  toast('削除しました');
+});
+
+/* ========== 10. 初期化 ========== */
+syncSkipUI();
+render();
+
+const secureOrigin = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+if ('serviceWorker' in navigator && secureOrigin) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+})();
+</script>
+</body>
+</html>
